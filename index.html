@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>NSFW Detector</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nsfwjs@3.0.0/dist/nsfwjs.min.js"></script>
+    <style>
+        body { font-family: system-ui; background: #0f172a; color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 1rem; }
+        .container { max-width: 600px; background: #1e293b; border-radius: 1.5rem; padding: 2rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+        .upload { border: 2px dashed #3b82f6; border-radius: 1rem; padding: 2rem; text-align: center; cursor: pointer; margin-bottom: 1.5rem; background: #0f172a; }
+        .upload:hover { background: #1e293b; }
+        .preview { max-width: 100%; max-height: 300px; margin: 1rem auto; display: block; border-radius: 0.5rem; }
+        button { background: #3b82f6; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; color: white; font-weight: bold; cursor: pointer; width: 100%; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .result { margin-top: 1rem; background: #0f172a; border-radius: 0.5rem; padding: 1rem; }
+        .result p { margin: 0.5rem 0; }
+        .warning { color: #f87171; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔍 NSFW Vision AI</h1>
+    <div class="upload" id="uploadArea">
+        📸 Klik atau tarik gambar
+        <input type="file" id="imageInput" accept="image/*" style="display:none">
+    </div>
+    <img id="preview" class="preview" style="display:none">
+    <button id="analyzeBtn" disabled>🧠 Analisis</button>
+    <div id="result" class="result" style="display:none"></div>
+</div>
+
+<script>
+    const MODEL_PATH = './models/quantized_model/model.json';
+    let model = null;
+    let currentImage = null;
+
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('imageInput');
+    const preview = document.getElementById('preview');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const resultDiv = document.getElementById('result');
+
+    // Muat model lokal
+    async function loadModel() {
+        try {
+            console.log('Memuat model dari', MODEL_PATH);
+            model = await nsfwjs.load(MODEL_PATH);
+            console.log('Model siap');
+            analyzeBtn.disabled = false;
+            resultDiv.innerHTML = '<p>✅ Model siap, pilih gambar.</p>';
+            resultDiv.style.display = 'block';
+        } catch (err) {
+            console.error(err);
+            resultDiv.innerHTML = '<p class="warning">❌ Gagal muat model. Pastikan folder models/quantized_model ada dan berisi file model.json dan .bin.</p>';
+            resultDiv.style.display = 'block';
+        }
+    }
+
+    // Tampilkan preview
+    function handleImage(file) {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            alert('File harus gambar');
+            return;
+        }
+        currentImage = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            preview.src = e.target.result;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // Analisis
+    async function analyze() {
+        if (!model || !currentImage) return;
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = '⏳ Memproses...';
+        try {
+            // Buat elemen img untuk diklasifikasi
+            const img = new Image();
+            img.src = URL.createObjectURL(currentImage);
+            await img.decode();
+            const predictions = await model.classify(img);
+            URL.revokeObjectURL(img.src);
+            displayPredictions(predictions);
+        } catch (err) {
+            console.error(err);
+            resultDiv.innerHTML = '<p class="warning">Terjadi kesalahan saat analisis.</p>';
+        } finally {
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '🧠 Analisis';
+        }
+    }
+
+    function displayPredictions(predictions) {
+        resultDiv.innerHTML = '';
+        const sorted = predictions.sort((a,b) => b.probability - a.probability);
+        for (let p of sorted) {
+            const percent = (p.probability * 100).toFixed(2);
+            const name = p.className;
+            const color = name === 'Porn' || name === 'Hentai' ? '#f87171' : '#4ade80';
+            resultDiv.innerHTML += `<p><strong>${name}</strong>: ${percent}%</p><div style="background:#334155; height:8px; border-radius:4px;"><div style="background:${color}; width:${percent}%; height:8px; border-radius:4px;"></div></div>`;
+        }
+        const isDanger = predictions.some(p => (p.className === 'Porn' || p.className === 'Hentai') && p.probability > 0.5);
+        if (isDanger) {
+            resultDiv.innerHTML += '<p class="warning">⚠️ PERINGATAN: Konten dewasa terdeteksi.</p>';
+        }
+        resultDiv.style.display = 'block';
+    }
+
+    // Event handlers
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', e => e.preventDefault());
+    uploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) handleImage(file);
+    });
+    fileInput.addEventListener('change', e => {
+        if (e.target.files[0]) handleImage(e.target.files[0]);
+    });
+    analyzeBtn.addEventListener('click', analyze);
+
+    // Mulai
+    loadModel();
+</script>
+</body>
+</html>
